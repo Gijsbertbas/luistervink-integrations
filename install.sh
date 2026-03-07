@@ -77,4 +77,4 @@ EOF
 
 install_cron_job
 
-print_message "✅ Luistervink task processor is installed." "$GREEN"
+print_message "✅ Luistervink task processor is installed or updated." "$GREEN"
