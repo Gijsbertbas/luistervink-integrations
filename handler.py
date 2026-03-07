@@ -63,8 +63,6 @@ class DetectionSoundHandler(BaseHandler):
         cur.execute(sql)
         detections = cur.fetchall()
 
-        breakpoint()
-
         if len(detections) == 1:
             return self._construct_file_path(detections[0])
         return None
