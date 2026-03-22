@@ -7,9 +7,7 @@ log = logging.getLogger(__name__)
 class LuistervinkClient:
     def __init__(self, conf: dict):
         self.conf = conf
-        self.base_url = conf.get(
-            "baseurl", "https://api.luistervink.nl"
-        ).strip("/")
+        self.base_url = conf.get("baseurl", "https://api.luistervink.nl").strip("/")
         self.params = {"token": conf.get("id")}
         self.session = requests.Session()
 
@@ -21,8 +19,10 @@ class LuistervinkClient:
         self, endpoint: str, data: dict | None = None, files: dict | None = None
     ) -> requests.Response:
         url = f"{self.base_url}/{endpoint}"
-        return requests.post(url, json=data, params=self.params, files=files)
+        return requests.post(
+            url, json=data, params=self.params, files=files, timeout=30
+        )
 
     def put(self, endpoint: str, data: dict | None = None) -> requests.Response:
         url = f"{self.base_url}/{endpoint}"
-        return requests.put(url, json=data, params=self.params)
+        return requests.put(url, json=data, params=self.params, timeout=30)

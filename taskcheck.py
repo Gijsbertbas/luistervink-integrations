@@ -1,11 +1,11 @@
 import logging
 from client import LuistervinkClient
 from dto import Task
-from handler import DetectionSoundHandler
-from settings import get_settings
+from handler import DetectionSoundHandler, ReloadDetectionsHandler
+from settings import get_settings, MAX_TASKS
 import sys
 
-log = logging.getLogger('task_processor')
+log = logging.getLogger("task_processor")
 log.setLevel(logging.INFO)
 formatter = logging.Formatter("[%(name)s][%(levelname)s] %(message)s")
 handler = logging.StreamHandler(stream=sys.stdout)
@@ -17,13 +17,20 @@ log.addHandler(handler)
 class TasksProcessor:
     def __init__(self, client: LuistervinkClient):
         self.client = client
-        self.handlers = [DetectionSoundHandler]
+        self.handlers = [
+            DetectionSoundHandler,
+            ReloadDetectionsHandler,
+        ]
 
     def process_tasks(self):
         """Process tasks from the Luistervink API."""
         tasks = self.collect()
-        log.info(f'{len(tasks)} task{"s" if len(tasks) == 1 else ""} collected')
-        for task in tasks:
+        log.info(f"{len(tasks)} task{'s' if len(tasks) == 1 else ''} collected")
+
+        if len(tasks) > MAX_TASKS:
+            log.warning(f"Limiting to the first {MAX_TASKS} tasks")
+
+        for task in tasks[:MAX_TASKS]:
             log.info(
                 f"[Luistervink] Processing task: {task.type} with spec: {task.spec}"
             )
@@ -56,11 +63,10 @@ class TasksProcessor:
 
 if __name__ == "__main__":
     settings = get_settings()
-
-    if not settings['enabled']:
-        log.info('Luistervink integration not enabled, not processing further')
+    if not settings["enabled"]:
+        log.info("Luistervink integration not enabled, not processing further")
         sys.exit(0)
-    
+
     client = LuistervinkClient(settings)
     processor = TasksProcessor(client)
     processor.process_tasks()
