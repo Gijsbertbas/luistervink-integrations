@@ -175,13 +175,14 @@ class ReloadDetectionsHandler(BaseHandler):
                 self._post_results(self.STATUS_FAILED)
                 return
 
+            local_tz = get_localzone()  # reads system timezone
+
             timestamp = datetime.strptime(
-                f"{detection.date}T{detection.time}Z", "%Y-%m-%dT%H:%M:%SZ"
-            ).replace(tzinfo=timezone.utc)
-            local_tz = timestamp.astimezone(get_localzone())
+                f"{detection.date}T{detection.time}", "%Y-%m-%dT%H:%M:%S"
+            ).replace(tzinfo=local_tz)
 
             data = {
-                "timestamp": local_tz.isoformat(),
+                "timestamp": timestamp.isoformat(),
                 "commonName": detection.common_name,
                 "scientificName": detection.scientific_name,
                 "lat": detection.latitude,
