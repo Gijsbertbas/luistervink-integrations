@@ -8,3 +8,8 @@ curl -s https://raw.githubusercontent.com/gijsbertbas/luistervink-integrations/m
 ```
 
 Inspect the last 20 log messages from task executions on the device with `sudo journalctl -t luistervink_task_check -n 20` (add `-f` to see live logging).
+
+Uninstall the Luistervink task checker for birdnet-go in a similar way:
+```bash
+curl -s https://raw.githubusercontent.com/gijsbertbas/luistervink-integrations/main/uninstall.sh | bash
+```
