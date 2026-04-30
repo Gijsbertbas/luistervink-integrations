@@ -1,6 +1,12 @@
 #!/bin/bash
 
 TARGET_DIR="$HOME/luistervink"
+ASSUME_YES=0
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) ASSUME_YES=1 ;;
+    esac
+done
 
 # Colors for output
 RED='\033[0;31m'
@@ -21,9 +27,23 @@ print_message() {
 }
 
 confirm() {
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        return
+    fi
+
+    if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
+        print_message "❌ No terminal available to read confirmation." "$RED"
+        print_message "💡 Run non-interactively with: curl -s <url> | bash -s -- --yes" "$YELLOW"
+        exit 1
+    fi
+
     print_message "⚠️  This will remove $TARGET_DIR and the luistervink cron entry from /etc/crontab." "$YELLOW"
     print_message "Continue? [y/N] " "$YELLOW" "nonewline"
-    read -r reply
+    if [ -t 0 ]; then
+        read -r reply
+    else
+        read -r reply < /dev/tty
+    fi
     case "$reply" in
         y|Y|yes|YES) ;;
         *)
