@@ -3,7 +3,7 @@ import json
 import os
 import sqlite3
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 import time
 from dto import Detection
 from tzlocal import get_localzone
@@ -12,6 +12,26 @@ from client import LuistervinkClient
 from settings import DB_PATH, DATA_DIR, MAX_DETECTIONS_UPLOAD
 
 log = logging.getLogger("task_processor")
+
+
+def _connect() -> sqlite3.Connection:
+    """Open the birdnet-go database and verify it uses the v2 schema.
+
+    birdnet-go's v2 ("enhanced") datastore replaces the flat ``notes`` table
+    with a normalized ``detections`` / ``labels`` structure. Raise early with a
+    clear message if the database has not been migrated yet.
+    """
+    con = sqlite3.connect(DB_PATH)
+    has_detections = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'detections'"
+    ).fetchone()
+    if has_detections is None:
+        con.close()
+        raise RuntimeError(
+            f"No 'detections' table found in {DB_PATH}; the birdnet-go database "
+            "has not been migrated to the v2 schema yet"
+        )
+    return con
 
 
 class BaseHandler:
@@ -49,25 +69,28 @@ class DetectionSoundHandler(BaseHandler):
 
     def _find_detection_filename(self) -> str | None:
         """Find a detection in the database based on the spec."""
-        scientific_name = self.spec.get("scientific_name")
-        confidence = self.spec.get("confidence")
-
+        # detections.detected_at is an absolute Unix epoch (seconds), so match
+        # against it directly instead of formatting local date/time strings.
         utc_dt = datetime.fromisoformat(self.spec["timestamp"].replace("Z", "+00:00"))
-        local_tz = utc_dt.astimezone(get_localzone())
+        detected_at = int(utc_dt.timestamp())
 
-        date = local_tz.strftime("%Y-%m-%d")
-        time = local_tz.strftime("%H:%M:%S")
-
-        con = sqlite3.connect(DB_PATH)
-        cur = con.cursor()
-
-        sql = f"""SELECT scientific_name, clip_name FROM notes
-            WHERE date = DATE('{date}')
-            AND time = TIME('{time}')
-            AND scientific_name = '{scientific_name}'
-            AND confidence >= {confidence}"""
-        cur.execute(sql)
-        detections = cur.fetchall()
+        sql = """
+            SELECT l.scientific_name, d.clip_name
+            FROM detections d
+            JOIN labels l ON l.id = d.label_id
+            WHERE d.detected_at = ?
+              AND l.scientific_name = ?
+              AND d.confidence >= ?
+        """
+        with _connect() as con:
+            detections = con.execute(
+                sql,
+                (
+                    detected_at,
+                    self.spec.get("scientific_name"),
+                    self.spec.get("confidence"),
+                ),
+            ).fetchall()
 
         if len(detections) == 1:
             return self._construct_file_path(detections[0])
@@ -155,14 +178,23 @@ class ReloadDetectionsHandler(BaseHandler):
         self._post_results(status)
 
     def _collect_detections(self, date: str) -> list[Detection]:
-        # Order of fields needs to correspond with the Detection model
-        sql = f"""SELECT date, time, begin_time, end_time, scientific_name, common_name, confidence, latitude, longitude 
-        FROM notes WHERE date = '{date}' AND confidence >= threshold ORDER BY time ASC"""
-
-        with sqlite3.connect(DB_PATH) as con:
-            cur = con.cursor()
-            cur.execute(sql)
-            detections = cur.fetchall()
+        # Field order must correspond with the Detection dataclass.
+        # detected_at is stored as a UTC Unix epoch; convert to a local date
+        # to match the requested calendar day. Only 'species' labels are
+        # uploaded (excludes noise/environment/device), and detections flagged
+        # 'unlikely' by the ultrasonic validation filter are skipped.
+        sql = """
+            SELECT d.detected_at, l.scientific_name, d.confidence, d.latitude, d.longitude
+            FROM detections d
+            JOIN labels l ON l.id = d.label_id
+            JOIN label_types lt ON lt.id = l.label_type_id
+            WHERE date(d.detected_at, 'unixepoch', 'localtime') = ?
+              AND lt.name = 'species'
+              AND d.unlikely = 0
+            ORDER BY d.detected_at ASC
+        """
+        with _connect() as con:
+            detections = con.execute(sql, (date,)).fetchall()
         return [Detection(*detection) for detection in detections]
 
     def _upload_detections(self, detections: list[Detection]) -> None:
@@ -175,15 +207,14 @@ class ReloadDetectionsHandler(BaseHandler):
                 self._post_results(self.STATUS_FAILED)
                 return
 
-            local_tz = get_localzone()  # reads system timezone
-
-            timestamp = datetime.strptime(
-                f"{detection.date}T{detection.time}", "%Y-%m-%dT%H:%M:%S"
-            ).replace(tzinfo=local_tz)
+            # detected_at is an absolute Unix epoch; render it in system-local
+            # time to keep the uploaded timestamp consistent with prior behaviour.
+            timestamp = datetime.fromtimestamp(
+                detection.detected_at, tz=get_localzone()
+            )
 
             data = {
                 "timestamp": timestamp.isoformat(),
-                "commonName": detection.common_name,
                 "scientificName": detection.scientific_name,
                 "lat": detection.latitude,
                 "lon": detection.longitude,

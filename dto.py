@@ -10,12 +10,8 @@ class Task:
 
 @dataclass
 class Detection:
-    date: str
-    time: str
-    begin_time: str
-    end_time: str
+    detected_at: int  # Unix epoch seconds, from detections.detected_at
     scientific_name: str
-    common_name: str
     confidence: float
-    latitude: float
-    longitude: float
+    latitude: float | None
+    longitude: float | None
